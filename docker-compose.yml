@@ -1,0 +1,79 @@
+version: "3.9"
+
+# ============================================================
+# 週末戰士 Weekend Warrior — Docker Compose
+# 適用：QNAP TS-932PX (ARM64 架構)
+# ============================================================
+
+services:
+
+  # ── 1. 資料庫 ─────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine          # ARM64 相容
+    container_name: ww_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-weekend_warrior}
+      POSTGRES_USER: ${DB_USER:-ww_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - ww_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ww_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 2. 後端 API (FastAPI) ──────────────────────────────────
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ww_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-ww_admin}:${DB_PASSWORD}@db:5432/${DB_NAME:-weekend_warrior}
+      SECRET_KEY: ${SECRET_KEY}
+      FX_API_KEY: ${FX_API_KEY}        # 匯率 API 金鑰
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    volumes:
+      - ./data/uploads:/app/uploads    # 上傳檔案 (CSV、圖片)
+      - ./data/exports:/app/exports    # 輸出 PDF/Word
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ww_net
+
+  # ── 3. 反向代理 (Nginx) ────────────────────────────────────
+  nginx:
+    image: nginx:alpine                # ARM64 相容
+    container_name: ww_nginx
+    restart: unless-stopped
+    ports:
+      - "8088:80"                      # QNAP 本機：http://NAS_IP:8088
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./data/exports:/app/exports:ro # 讓 Nginx 可提供下載
+    depends_on:
+      - app
+    networks:
+      - ww_net
+
+  # ── 4. Cloudflare Tunnel (免費遠端存取) ───────────────────
+  tunnel:
+    image: cloudflare/cloudflared:latest  # 支援 ARM64
+    container_name: ww_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+    networks:
+      - ww_net
+
+# ── 網路 ──────────────────────────────────────────────────────
+networks:
+  ww_net:
+    driver: bridge
