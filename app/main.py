@@ -271,6 +271,7 @@ async def import_products(
                 name_en=str(row["name_en"]),
                 name_zh=str(row["name_zh"]) if "name_zh" in row and pd.notna(row.get("name_zh")) else None,
                 category=str(row["category"]) if "category" in row and pd.notna(row.get("category")) else None,
+                supplier_id=int(row["supplier_id"]) if "supplier_id" in row and pd.notna(row.get("supplier_id")) else None,
             )
             db.add(product)
             created += 1
